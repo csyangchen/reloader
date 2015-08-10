@@ -13,7 +13,7 @@
 -export([start/0, start_link/0]).
 -export([stop/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([all_changed/0]).
+-export([all_changed/0, all_changed/1]).
 -export([is_changed/1]).
 -export([reload/1]).
 -record(state, {
@@ -79,6 +79,13 @@ code_change(_Vsn, State, _Extra) ->
 %% @doc Return a list of loaded beam modules that have changed.
 all_changed() ->
     [M || {M, Fn} <- code:all_loaded(), is_list(Fn), is_changed(M)].
+
+-spec all_changed(atom()) -> [module()].
+%% @doc Return a list of loaded beam modules that have changed in application App.
+all_changed(App) ->
+    ensure_loaded(App),
+    {ok, Modules} = application:get_key(App, modules),
+    [M || M <- Modules, is_changed(M)].
 
 -spec is_changed(module()) -> boolean().
 %% @doc true if the loaded module is a beam with a vsn attribute
@@ -157,6 +164,15 @@ reload(Module) ->
                 end
         end,
     {Module, LoadRet}.
+
+ensure_loaded(App) ->
+    L = application:loaded_applications(),
+    case lists:keyfind(App, 1, L) of
+        false ->
+            ok = application:load(App);
+        _ ->
+            ok
+    end.
 
 stamp() ->
     erlang:localtime().
