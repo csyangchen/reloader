@@ -19,31 +19,26 @@
 -record(state, {
     last,
     tref,
-    timeout = timer:seconds(1)
+    timeout
 }).
 
 %% External API
 
-%% @spec start() -> ServerRet
 %% @doc Start the reloader.
 start() ->
     application:start(reloader).
 
-%% @spec stop() -> ok
 %% @doc Stop the reloader.
 stop() ->
     application:stop(reloader).
 
 %% @private
-%% @spec start_link() -> ServerRet
-%% @doc Start the reloader.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% gen_server callbacks
 
-%% @spec init([]) -> {ok, State}
-%% @doc gen_server init, opens the server in an initial state.
+%% @private
 init([]) ->
     Timeout = application:get_env(reloader, timeout, timer:seconds(1)),
     %% immediately reload on startup
@@ -51,20 +46,17 @@ init([]) ->
     TRef = erlang:send_after(Timeout, self(), doit),
     {ok, #state{last = stamp(), tref = TRef, timeout = Timeout}}.
 
-%% @spec handle_call(Args, From, State) -> tuple()
-%% @doc gen_server callback.
+%% @private
 handle_call(stop, _From, State) ->
     {stop, shutdown, stopped, State};
 handle_call(_Req, _From, State) ->
     {reply, {error, badrequest}, State}.
 
-%% @spec handle_cast(Cast, State) -> tuple()
-%% @doc gen_server callback.
+%% @private
 handle_cast(_Req, State) ->
     {noreply, State}.
 
-%% @spec handle_info(Info, State) -> tuple()
-%% @doc gen_server callback.
+%% @private
 handle_info(doit, State) ->
     Now = stamp(),
     _ = doit(State#state.last, Now),
@@ -73,24 +65,22 @@ handle_info(doit, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%% @spec terminate(Reason, State) -> ok
-%% @doc gen_server termination callback.
+%% @private
 terminate(_Reason, State) ->
     erlang:cancel_timer(State#state.tref),
     ok.
 
 
-%% @spec code_change(_OldVsn, State, _Extra) -> State
-%% @doc gen_server code_change callback (trivial).
+%% @private
 code_change(_Vsn, State, _Extra) ->
     {ok, State}.
 
-%% @spec all_changed() -> [atom()]
-%% @doc Return a list of beam modules that have changed.
+-spec all_changed() -> [module()].
+%% @doc Return a list of loaded beam modules that have changed.
 all_changed() ->
     [M || {M, Fn} <- code:all_loaded(), is_list(Fn), is_changed(M)].
 
-%% @spec is_changed(atom()) -> boolean()
+-spec is_changed(module()) -> boolean().
 %% @doc true if the loaded module is a beam with a vsn attribute
 %%      and does not match the on-disk beam file, returns false otherwise.
 is_changed(M) ->
@@ -127,41 +117,46 @@ doit(From, To) ->
             error
     end || {Module, Filename} <- code:all_loaded(), is_list(Filename)].
 
-%% @spec reload_modules([atom()]) -> [{module, atom()} | {error, term()}]
-%% @doc code:purge/1 and code:load_file/1 the given list of modules in order,
-%%      return the results of code:load_file/1.
+-spec reload(module() | [module()]) -> {module(), Result} | [{module(), Result}] when
+    Result :: unchanged
+    | reload
+    | reload_but_test_failed
+    | error.
+%% @doc code:purge/1 and code:load_file/1.
 reload(Modules) when is_list(Modules) ->
-    lists:foreach(fun reload/1, Modules);
+    lists:map(fun reload/1, Modules);
 reload(Module) ->
     io:format("Reloading ~p ...", [Module]),
-    case is_changed(Module) of
-        false ->
-            io:format(" unchanged.~n");
-        true ->
-            code:purge(Module),
-            case code:load_file(Module) of
-                {module, Module} ->
-                    io:format(" ok.~n"),
-                    case erlang:function_exported(Module, test, 0) of
-                        true ->
-                            io:format(" - Calling ~p:test() ...", [Module]),
-                            case catch Module:test() of
-                                ok ->
-                                    io:format(" ok.~n"),
-                                    reload;
-                                Reason ->
-                                    io:format(" fail: ~p.~n", [Reason]),
-                                    reload_but_test_failed
-                            end;
-                        false ->
-                            reload
-                    end;
-                {error, Reason} ->
-                    io:format(" fail: ~p.~n", [Reason]),
-                    error
-            end
-    end.
-
+    LoadRet =
+        case is_changed(Module) of
+            false ->
+                io:format(" unchanged.~n"),
+                unchanged;
+            true ->
+                code:purge(Module),
+                case code:load_file(Module) of
+                    {module, Module} ->
+                        io:format(" ok.~n"),
+                        case erlang:function_exported(Module, test, 0) of
+                            true ->
+                                io:format(" - Calling ~p:test() ...", [Module]),
+                                case catch Module:test() of
+                                    ok ->
+                                        io:format(" ok.~n"),
+                                        reload;
+                                    Reason ->
+                                        io:format(" fail: ~p.~n", [Reason]),
+                                        reload_but_test_failed
+                                end;
+                            false ->
+                                reload
+                        end;
+                    {error, Reason} ->
+                        io:format(" fail: ~p.~n", [Reason]),
+                        error
+                end
+        end,
+    {Module, LoadRet}.
 
 stamp() ->
     erlang:localtime().

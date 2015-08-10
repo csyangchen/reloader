@@ -1,5 +1,6 @@
 .rebar
 .eunit
+doc
 deps
 priv
 ebin

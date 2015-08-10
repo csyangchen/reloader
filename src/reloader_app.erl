@@ -1,3 +1,5 @@
+%% @private
+
 -module(reloader_app).
 
 -behaviour(application).
