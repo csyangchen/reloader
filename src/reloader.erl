@@ -94,7 +94,7 @@ is_changed(M) ->
     try
         module_vsn(M:module_info()) =/= module_vsn(code:get_object_code(M))
     catch _:_ ->
-            false
+        false
     end.
 
 %% Internal API
@@ -109,20 +109,20 @@ module_vsn(L) when is_list(L) ->
 
 doit(From, To) ->
     [case file:read_file_info(Filename) of
-         {ok, #file_info{mtime = Mtime}} when Mtime >= From, Mtime < To ->
-             reload(Module);
-         {ok, _} ->
-             unmodified;
-         {error, enoent} ->
-             %% The Erlang compiler deletes existing .beam files if
-             %% recompiling fails.  Maybe it's worth spitting out a
-             %% warning here, but I'd want to limit it to just once.
-             gone;
-         {error, Reason} ->
-             io:format("Error reading ~s's file info: ~p~n",
-                       [Filename, Reason]),
-             error
-     end || {Module, Filename} <- code:all_loaded(), is_list(Filename)].
+        {ok, #file_info{mtime = Mtime}} when Mtime >= From, Mtime < To ->
+            reload(Module);
+        {ok, _} ->
+            unmodified;
+        {error, enoent} ->
+            %% The Erlang compiler deletes existing .beam files if
+            %% recompiling fails.  Maybe it's worth spitting out a
+            %% warning here, but I'd want to limit it to just once.
+            gone;
+        {error, Reason} ->
+            io:format("Error reading ~s's file info: ~p~n",
+                [Filename, Reason]),
+            error
+    end || {Module, Filename} <- code:all_loaded(), is_list(Filename)].
 
 reload(Module) ->
     io:format("Reloading ~p ...", [Module]),

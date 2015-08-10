@@ -1,5 +1,6 @@
-Add the following line to your rebar.config:
+# reloader
 
-    {deps, [
-            {reloader, ".*", {git, "git://github.com/brendanhay/reloader.git", {branch, "master"}}}
-           ]}.
+## TODO
+
+- reload by application
+- integrate with rebar: reload only if `rebar compile` success
