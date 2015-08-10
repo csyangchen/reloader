@@ -15,33 +15,41 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([all_changed/0]).
 -export([is_changed/1]).
--export([reload_modules/1]).
--record(state, {last, tref}).
+-export([reload/1]).
+-record(state, {
+    last,
+    tref,
+    timeout = timer:seconds(1)
+}).
 
 %% External API
 
 %% @spec start() -> ServerRet
 %% @doc Start the reloader.
 start() ->
-    gen_server:start({local, ?MODULE}, ?MODULE, [], []).
-
-%% @spec start_link() -> ServerRet
-%% @doc Start the reloader.
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    application:start(reloader).
 
 %% @spec stop() -> ok
 %% @doc Stop the reloader.
 stop() ->
-    gen_server:call(?MODULE, stop).
+    application:stop(reloader).
+
+%% @private
+%% @spec start_link() -> ServerRet
+%% @doc Start the reloader.
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% gen_server callbacks
 
 %% @spec init([]) -> {ok, State}
 %% @doc gen_server init, opens the server in an initial state.
 init([]) ->
-    {ok, TRef} = timer:send_interval(timer:seconds(1), doit),
-    {ok, #state{last = stamp(), tref = TRef}}.
+    Timeout = application:get_env(reloader, timeout, timer:seconds(1)),
+    %% immediately reload on startup
+    reload(all_changed()),
+    TRef = erlang:send_after(Timeout, self(), doit),
+    {ok, #state{last = stamp(), tref = TRef, timeout = Timeout}}.
 
 %% @spec handle_call(Args, From, State) -> tuple()
 %% @doc gen_server callback.
@@ -60,14 +68,15 @@ handle_cast(_Req, State) ->
 handle_info(doit, State) ->
     Now = stamp(),
     _ = doit(State#state.last, Now),
-    {noreply, State#state{last = Now}};
+    TRef = erlang:send_after(State#state.timeout, self(), doit),
+    {noreply, State#state{last = Now, tref = TRef}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @spec terminate(Reason, State) -> ok
 %% @doc gen_server termination callback.
 terminate(_Reason, State) ->
-    {ok, cancel} = timer:cancel(State#state.tref),
+    erlang:cancel_timer(State#state.tref),
     ok.
 
 
@@ -75,12 +84,6 @@ terminate(_Reason, State) ->
 %% @doc gen_server code_change callback (trivial).
 code_change(_Vsn, State, _Extra) ->
     {ok, State}.
-
-%% @spec reload_modules([atom()]) -> [{module, atom()} | {error, term()}]
-%% @doc code:purge/1 and code:load_file/1 the given list of modules in order,
-%%      return the results of code:load_file/1.
-reload_modules(Modules) ->
-    [begin code:purge(M), code:load_file(M) end || M <- Modules].
 
 %% @spec all_changed() -> [atom()]
 %% @doc Return a list of beam modules that have changed.
@@ -124,29 +127,39 @@ doit(From, To) ->
             error
     end || {Module, Filename} <- code:all_loaded(), is_list(Filename)].
 
+%% @spec reload_modules([atom()]) -> [{module, atom()} | {error, term()}]
+%% @doc code:purge/1 and code:load_file/1 the given list of modules in order,
+%%      return the results of code:load_file/1.
+reload(Modules) when is_list(Modules) ->
+    lists:foreach(fun reload/1, Modules);
 reload(Module) ->
     io:format("Reloading ~p ...", [Module]),
-    code:purge(Module),
-    case code:load_file(Module) of
-        {module, Module} ->
-            io:format(" ok.~n"),
-            case erlang:function_exported(Module, test, 0) of
-                true ->
-                    io:format(" - Calling ~p:test() ...", [Module]),
-                    case catch Module:test() of
-                        ok ->
-                            io:format(" ok.~n"),
-                            reload;
-                        Reason ->
-                            io:format(" fail: ~p.~n", [Reason]),
-                            reload_but_test_failed
+    case is_changed(Module) of
+        false ->
+            io:format(" unchanged.~n");
+        true ->
+            code:purge(Module),
+            case code:load_file(Module) of
+                {module, Module} ->
+                    io:format(" ok.~n"),
+                    case erlang:function_exported(Module, test, 0) of
+                        true ->
+                            io:format(" - Calling ~p:test() ...", [Module]),
+                            case catch Module:test() of
+                                ok ->
+                                    io:format(" ok.~n"),
+                                    reload;
+                                Reason ->
+                                    io:format(" fail: ~p.~n", [Reason]),
+                                    reload_but_test_failed
+                            end;
+                        false ->
+                            reload
                     end;
-                false ->
-                    reload
-            end;
-        {error, Reason} ->
-            io:format(" fail: ~p.~n", [Reason]),
-            error
+                {error, Reason} ->
+                    io:format(" fail: ~p.~n", [Reason]),
+                    error
+            end
     end.
 
 

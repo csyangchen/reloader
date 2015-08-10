@@ -6,6 +6,6 @@
         kernel,
         stdlib
     ]},
-    {mod, {reloader, []}},
+    {mod, {reloader_app, []}},
     {env, []}
 ]}.
