@@ -10,12 +10,19 @@
 -include_lib("kernel/include/file.hrl").
 
 -behaviour(gen_server).
--export([start/0, start_link/0]).
--export([stop/0]).
+
+-export([start/0, stop/0]).
+
+%% module operation
+-export([reload/1, is_changed/1, all_changed/0]).
+
+%% application operation
+-export([all_changed/1, all_loaded/1, ensure_loaded/1, mods/1, reload_app/1]).
+
+%% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([all_changed/0, all_changed/1]).
--export([is_changed/1]).
--export([reload/1]).
+-export([start_link/0]).
+
 -record(state, {
     last,
     tref,
@@ -83,9 +90,16 @@ all_changed() ->
 -spec all_changed(atom()) -> [module()].
 %% @doc Return a list of loaded beam modules that have changed in application App.
 all_changed(App) ->
-    ensure_loaded(App),
-    {ok, Modules} = application:get_key(App, modules),
-    [M || M <- Modules, is_changed(M)].
+    [M || M <- mods(App), is_changed(M)].
+
+-spec all_loaded(atom()) -> [module()].
+%% @doc Get a list of loaded modules in application App.
+all_loaded(App) ->
+    lists:filter(fun(M) -> code:is_loaded(M) =/= false end, mods(App)).
+
+%% @doc Ensure all modules in application App is loaded, useful when we want werl tab complection.
+ensure_loaded(App) ->
+    lists:map(fun code:ensure_loaded/1, mods(App)).
 
 -spec is_changed(module()) -> boolean().
 %% @doc true if the loaded module is a beam with a vsn attribute
@@ -165,7 +179,15 @@ reload(Module) ->
         end,
     {Module, LoadRet}.
 
-ensure_loaded(App) ->
+
+-spec mods(atom()) -> [module()].
+%% @doc Get list of modules in application App.
+mods(App) ->
+    app_ensure_loaded(App),
+    {ok, Modules} = application:get_key(App, modules),
+    Modules.
+
+app_ensure_loaded(App) ->
     L = application:loaded_applications(),
     case lists:keyfind(App, 1, L) of
         false ->
@@ -173,6 +195,10 @@ ensure_loaded(App) ->
         _ ->
             ok
     end.
+
+%% @doc Reload changed modules in application App.
+reload_app(App) ->
+    reload(all_changed(App)).
 
 stamp() ->
     erlang:localtime().
