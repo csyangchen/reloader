@@ -182,6 +182,7 @@ reload(Module) ->
 
 -spec mods(atom()) -> [module()].
 %% @doc Get list of modules in application App.
+%% TODO cannot find added modules at runtime
 mods(App) ->
     app_ensure_loaded(App),
     {ok, Modules} = application:get_key(App, modules),

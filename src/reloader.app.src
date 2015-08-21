@@ -1,7 +1,7 @@
 {application, reloader, [
     {description, ""},
     {vsn, "1"},
-    {registered, []},
+    {registered, [reloader]},
     {applications, [
         kernel,
         stdlib
